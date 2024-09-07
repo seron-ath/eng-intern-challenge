@@ -70,7 +70,7 @@ class BrailleTranslator:
     INVERSE_LETTER_BRAILLE_MAP = {}
     INVERSE_DIGIT_BRAILLE_MAP = {}
     INVERSE_BRAILLE_MODIFIERS = {}
-    INVERSE__BRAILLE_SPECIAL_MAP = {}
+    INVERSE_BRAILLE_SPECIAL_MAP = {}
 
     BRAILLE_CHARSET = set()
 
@@ -89,20 +89,33 @@ class BrailleTranslator:
 
         # Define the inverses
         self.INVERSE_LETTER_BRAILLE_MAP = dict(
-            map(reversed, self.INVERSE_LETTER_BRAILLE_MAP.items())
+            map(reversed, self.LETTER_BRAILLE_MAP.items())
         )
         self.INVERSE_DIGIT_BRAILLE_MAP = dict(
-            map(reversed, self.INVERSE_DIGIT_BRAILLE_MAP.items())
+            map(reversed, self.DIGIT_BRAILLE_MAP.items())
         )
         self.INVERSE_BRAILLE_MODIFIERS = dict(
-            map(reversed, self.INVERSE_BRAILLE_MODIFIERS.items())
+            map(reversed, self.BRAILLE_MODIFIERS.items())
         )
-        self.INVERSE__BRAILLE_SPECIAL_MAP =dict(
-            map(reversed, self.INVERSE__BRAILLE_SPECIAL_MAP.items())
+        self.INVERSE_BRAILLE_SPECIAL_MAP =dict(
+            map(reversed, self.BRAILLE_SPECIAL_MAP.items())
         )
 
     def translate(self, message: str) -> str:
-        pass
+        """Translate a message to braille or english depending on the message type.
+
+        Note: translator will default to english braille translation on unsupported 
+        braille symbols.
+
+        :param message: A message that is in either braille or english.
+        :type message: str
+        :return: str A translated message opposite of the original word language.
+        :rtype: bool
+        """
+
+        if(self.__is_braille(message)):
+            return self.__braille_to_english(message)
+        return self.__english_to_braille(message)
     
 
     def is_braille(self, message: str) -> bool:
@@ -138,19 +151,18 @@ class BrailleTranslator:
         return valid_chunk
 
 
-    def braille_to_english(self, message: str) -> str:
-        return self.__braille_to_english(message)
-    
-
     def __braille_to_english(self, message: str) -> str:
         '''Converts braille message to english
+
+        Preconditions:
+            1. Message cannot end on a modifier. (capital / number) follows 
+            2. A decimal modifier must come after a number modifier to \
+                denote a decimal digit
 
         :param message: The message to translate.
         :type message: str
         :return: A english translation of the message.
-        :rtype: bool
-        :raise: 
-            - `Exception`: if an unknown braille letter is present.
+        :rtype: str
         '''
         message_size = len(message)
         message_chunks = []
@@ -158,24 +170,98 @@ class BrailleTranslator:
             chunk = message[chunk_pos: chunk_pos+6]
             message_chunks.append(chunk)
 
-        
-        
-
-
+    
         translated_message = ""
         chunk_size = len(message_chunks)
         pos = 0
 
+        is_space = lambda w: w == self.BRAILLE_SPECIAL_MAP.get(" ")
+        is_letter = lambda w: w in self.INVERSE_LETTER_BRAILLE_MAP 
+        is_number = lambda w: w == self.BRAILLE_MODIFIERS.get("NUMBER_FOLLOW")
+        is_capital = lambda w: w == self.BRAILLE_MODIFIERS.get("CAPITAL_FOLLOW")
+        is_decimal = lambda w: w == self.BRAILLE_MODIFIERS.get("DECIMAL_FOLLOW")
+        is_special = lambda w: w in self.INVERSE_BRAILLE_SPECIAL_MAP 
+        in_number_group = lambda w: w in self.INVERSE_DIGIT_BRAILLE_MAP
+        in_decimal_group = lambda w: in_number_group(w) or is_decimal(w) \
+            and not is_space(w)
+
+        current_context = None
+
         while(pos < chunk_size):
             braille_symbol = message_chunks[pos]
-            is_space = lambda w: w == self.BRAILLE_SPECIAL_MAP.get(" ")
-            is_letter = lambda w: w in self.INVERSE_LETTER_BRAILLE_MAP 
-            pass
+            
+            if(is_space(braille_symbol)):
+                current_context = None
+                translated_message += " "
+                pos += 1
+                continue
 
-        return chunk_size
+            elif(is_letter(braille_symbol)):
+                translated_message += self.INVERSE_LETTER_BRAILLE_MAP.get(
+                    braille_symbol
+                ).lower()
+                pos += 1
+                continue
+
+            elif(is_capital(braille_symbol)):
+                valid_bound = pos + 1 < chunk_size
+                if(not valid_bound):
+                    raise Exception("Cannot capitalize a non-existing letter")
+                capital_symbol = message_chunks[pos + 1]
+                valid_letter = is_letter(capital_symbol)
+                if(not valid_letter):
+                    raise Exception(f'Unknown braille symbol detected \
+                        during capitalization = {capital_symbol} \n at position {pos+1}')
+                translated_message += self.INVERSE_LETTER_BRAILLE_MAP.get(
+                    capital_symbol
+                )
+                # Since we processed 2 braille symbols. (Modifier and letter)
+                pos += 2
+                continue
+
+            elif(is_number(braille_symbol)):
+                valid_bound = pos + 1 < chunk_size
+                if(not valid_bound):
+                    raise Exception("Non-existing digit at EOL at position ...")
+                current_digit = message_chunks[pos + 1]
+                valid_number = in_number_group(current_digit)
+                if(not valid_number):
+                    if(is_decimal(current_digit)):
+                        raise Exception("Number modifier cannot directly preceed \
+                             decimal modifier.")
+                    raise Exception(f'Unknown braille number symbol at position ${pos+1}')
+                right = pos + 1
+                chunk = ""
+                while(right < chunk_size and in_decimal_group(message_chunks[right])):
+                    current_digit = self.INVERSE_DIGIT_BRAILLE_MAP.get(message_chunks[right])
+                    if(current_digit is None):
+                        if(is_decimal(message_chunks[right])):
+                            chunk += "."
+                        else:
+                            print(self.BRAILLE_MODIFIERS.get("DECIMAL_FOLLOW"))
+                            print(current_digit)
+                            print(is_decimal(current_digit))
+                            raise Exception(f'Unknown Digit Symbol ${message_chunks[right]} \
+                                            at position ${right}')
+                    else:
+                        chunk += current_digit
+                
+                    right += 1 
+
+                translated_message += chunk
+                pos = right
+                continue
+            elif(is_special(braille_symbol)):
+                translated_message += self.INVERSE_BRAILLE_SPECIAL_MAP.get(
+                    braille_symbol
+                )
+                pos += 1
+                continue
+            raise Exception(f'Unhandled state while processing symbol {braille_symbol} \nat \
+                position ${pos} in during translation')
+
+        return translated_message
     
-    def english_to_braille(self, message: str) -> str:
-        return self.__english_to_braille(message)
 
     def __english_to_braille(self, message: str) -> str:
         """Converts message to braille.
@@ -193,60 +279,59 @@ class BrailleTranslator:
         :type message: str
         :return: A Braille translation of message.
         :rtype: str
-        :raise: 
-            - `Exception`: if unsupported symbol is present during translaton.
         """
 
-        in_number_group = lambda symbol : symbol.isdigit() and symbol != " "
+        is_letter = lambda w: w in self.LETTER_BRAILLE_MAP
+        is_digit = lambda w: w in self.DIGIT_BRAILLE_MAP  
+        is_special = lambda w: w in self.BRAILLE_SPECIAL_MAP
+        is_decimal = lambda w: w == "."
+        in_number_group = lambda symbol : symbol.isdigit() or is_decimal(symbol) \
+             and symbol != " "
         
+
         braille_message = ""
         message_size = len(message)
         pos = 0
 
         while(pos < message_size):
-            if(message[pos].isupper()):
-                current_modifier = self.BRAILLE_MODIFIERS["CAPITAL_FOLLOW"]
-                braille_symbol = self.LETTER_BRAILLE_MAP.get(message[pos])
-                if(braille_symbol is None):
-                    raise Exception(f'Unknown Capital Symbol ${message[pos]} \
-                                    at position ${pos}')
-                braille_message += current_modifier + braille_symbol
+            english_symbol = message[pos]
+            if(is_letter(english_symbol.upper())):
+                braille_symbol = self.LETTER_BRAILLE_MAP.get(english_symbol.upper())
+                if(english_symbol.isupper()):
+                    braille_message += self.BRAILLE_MODIFIERS["CAPITAL_FOLLOW"] + \
+                         braille_symbol
+                else:
+                    braille_message += braille_symbol
                 pos += 1
                 continue
 
-            elif(message[pos].isdigit()):
+            elif(is_digit(english_symbol)):
                 #Expand until there are no more digits.
-                current_modifier = self.BRAILLE_MODIFIERS["NUMBER_FOLLOW"]
                 chunk = ""
                 right = pos
                 while(right < message_size and in_number_group(message[right])):
                     braille_symbol = self.DIGIT_BRAILLE_MAP.get(message[right])
                     if(braille_symbol is None):
-                        raise Exception(f'Unknown Digit Symbol ${message[right]} \
+                        if(is_decimal(message[right])):
+                            chunk += self.BRAILLE_MODIFIERS["DECIMAL_FOLLOW"]
+                        else:
+                            raise Exception(f'Unknown Digit Symbol {message[right]} \
                                         at position ${right}')
-                    chunk += braille_symbol
+                    else:
+                        chunk += braille_symbol
                     right += 1
 
-                braille_message += current_modifier + chunk
+                braille_message += self.BRAILLE_MODIFIERS["NUMBER_FOLLOW"] + chunk
                 pos = right
                 continue
-
-            elif(message[pos].isspace()):
-                current_modifier = None
-                braille_symbol = self.BRAILLE_SPECIAL_MAP.get(message[pos])
-                braille_message += braille_symbol
-                pos += 1
-                continue
-
-            elif(message[pos].isalpha()):
-                current_modifier = None
-                mkey = message[pos].upper()
-                braille_symbol = self.LETTER_BRAILLE_MAP.get(mkey)
+            
+            elif(is_special(english_symbol)):
+                braille_symbol = self.BRAILLE_SPECIAL_MAP.get(english_symbol)
                 braille_message += braille_symbol
                 pos += 1
                 continue
             else:
-                raise Exception(f'Unknown symbol ${message[pos]} at \
+                raise Exception(f'Unhandled state while processing symbol {message[pos]} \nat \
                                 position ${pos} in during translation')
 
         return braille_message
@@ -254,9 +339,21 @@ class BrailleTranslator:
 
 
     def __pad_braille_map(self, pad_mapping: dict[str,int]) -> dict[str, str]:
-        '''
-        Converts the pad number values to its equilvant braille number.
-        '''
+        """Converts braille pad number mapping to a braille string mapping
+
+        Braille pad numbers corrospond to the markings on a 2x6 grid.
+        The ordering of digit has no effect on the output. 
+            - Example: 251 and 152 both map to the same padding.
+        
+        If a digit is present in the braille pad number then it corrosponds to
+        raised dot at a position.
+
+        :param pad_mapping: A string to pad number mapping.
+        :type pad_mapping: dict[str,int]
+        :return: A string to braille mapping. 
+        :rtype: dict[str, str]
+        """
+
         brail_map = {}
         for k,v in pad_mapping.items():
             brail_map[k] = self.__pad_number_to_braille_map(v)
@@ -267,7 +364,13 @@ class BrailleTranslator:
         Converts a pad number to braille.
         A pad number contains the cell positions to mark on a 2x6 
         grid.
+
+        :param pad_number: a pad number thats to be converted.
+        :type pad_number: str
+        :return: A string to braille mapping. 
+        :rtype: int
         '''
+
         transform = ["."] * 6
         rtext = [int(c) for c in [*str(pad_number)]]
         for position in rtext:
@@ -277,4 +380,14 @@ class BrailleTranslator:
             transform[position_index] = "O"
         return ''.join(transform)
 
-translator = BrailleTranslator()
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(
+                    prog='translator.py',
+                    description='Translate between english and braille',
+                    epilog='For the shopify eng-intern-challenge 2025 by Seron Athavan.')
+                    
+    parser.add_argument('message', metavar='N', type=str, nargs='+',
+                    help='A message to translate')
+    args = parser.parse_args()
